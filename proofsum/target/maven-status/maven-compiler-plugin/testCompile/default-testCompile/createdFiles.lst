@@ -1,0 +1,5 @@
+com/proofsum/service/RetrievalServiceTest.class
+com/proofsum/store/InMemoryVectorStoreTest.class
+com/proofsum/service/RetrievalServiceTest$RecordingVectorStore.class
+com/proofsum/service/EmbeddingServiceTest.class
+com/proofsum/service/ChunkingServiceTest.class

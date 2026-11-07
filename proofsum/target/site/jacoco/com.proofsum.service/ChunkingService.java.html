@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ChunkingService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ProofSum</a> &gt; <a href="index.source.html" class="el_package">com.proofsum.service</a> &gt; <span class="el_source">ChunkingService.java</span></div><h1>ChunkingService.java</h1><pre class="source lang-java linenums">package com.proofsum.service;
+
+import com.proofsum.model.Chunk;
+import com.proofsum.model.PageText;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
+
+/**
+ * Clean extracted page text and split it into overlapping word-window chunks.
+ * Each generated chunk retains its source page and the active recognized section.
+ */
+@Service
+public class ChunkingService {
+
+    /** Recognize supported research-paper section titles, optionally preceded by a number. */
+<span class="fc" id="L20">    private static final Pattern SECTION_HEADING = Pattern.compile(</span>
+            &quot;^\\s*(?:(?:\\d+(?:\\.\\d+)*|[IVX]+)\\.?\\s+)?&quot; +
+            &quot;(abstract|introduction|background|related work|literature review|&quot; +
+            &quot;methods?|methodology|materials and methods|experimental setup|experiments?|&quot; +
+            &quot;results?|results and discussion|discussion|analysis|evaluation|&quot; +
+            &quot;conclusions?|conclusion and future work|future work|limitations|&quot; +
+            &quot;acknowledg(?:e)?ments?|references|bibliography|appendix(?:\\s+[a-z])?)\\s*$&quot;,
+            Pattern.CASE_INSENSITIVE);
+
+    /** Rejoin words separated by a hyphen at a line break. */
+<span class="fc" id="L30">    private static final Pattern HYPHEN_BREAK = Pattern.compile(&quot;(\\w)-\\n(\\w)&quot;);</span>
+    /** Collapse repeated horizontal whitespace. */
+<span class="fc" id="L32">    private static final Pattern MULTI_SPACE = Pattern.compile(&quot;[ \\t]+&quot;);</span>
+    /** Limit runs of blank lines while retaining paragraph separation. */
+<span class="fc" id="L34">    private static final Pattern MULTI_NEWLINE = Pattern.compile(&quot;\\n{3,}&quot;);</span>
+
+    /** Maximum number of words in a generated chunk. */
+    private final int chunkWords;
+    /** Number of trailing words repeated at the start of the next chunk. */
+    private final int overlapWords;
+
+    /**
+     * Configure chunk word count and overlap.
+     *
+     * @param chunkWords maximum number of words in each chunk
+     * @param overlapWords requested number of overlapping words, capped at half the chunk size
+     */
+    public ChunkingService(@Value(&quot;${proofsum.chunk.size-words}&quot;) int chunkWords,
+<span class="fc" id="L48">                           @Value(&quot;${proofsum.chunk.overlap-words}&quot;) int overlapWords) {</span>
+<span class="fc" id="L49">        this.chunkWords = chunkWords;</span>
+<span class="fc" id="L50">        this.overlapWords = Math.min(overlapWords, chunkWords / 2);</span>
+<span class="fc" id="L51">    }</span>
+
+    /**
+     * Clean and split pages into chunks while retaining page, section, and ordinal metadata.
+     *
+     * @param documentId identifier included in each generated chunk
+     * @param pages extracted page text in document order
+     * @return chunks generated from non-blank page content; empty when no usable page text exists
+     */
+    public List&lt;Chunk&gt; chunk(String documentId, List&lt;PageText&gt; pages) {
+<span class="fc" id="L61">        List&lt;Chunk&gt; chunks = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L62">        String currentSection = &quot;Front matter&quot;;</span>
+<span class="fc" id="L63">        int ordinal = 0;</span>
+
+<span class="fc bfc" id="L65" title="All 2 branches covered.">        for (PageText page : pages) {</span>
+<span class="fc" id="L66">            String cleaned = clean(page.text());</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">            if (cleaned.isBlank()) continue;</span>
+
+            // Walk the page line by line so a heading switches the section
+            // for everything that follows it, even mid-page.
+<span class="fc" id="L71">            List&lt;String&gt; buffer = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L72" title="All 2 branches covered.">            for (String line : cleaned.split(&quot;\n&quot;)) {</span>
+<span class="fc" id="L73">                String trimmed = line.trim();</span>
+<span class="pc bpc" id="L74" title="1 of 2 branches missed.">                if (trimmed.isEmpty()) continue;</span>
+<span class="fc bfc" id="L75" title="All 2 branches covered.">                if (isHeading(trimmed)) {</span>
+<span class="fc" id="L76">                    ordinal = flush(chunks, buffer, documentId, page.pageNumber(), currentSection, ordinal);</span>
+<span class="fc" id="L77">                    currentSection = normalizeHeading(trimmed);</span>
+<span class="fc" id="L78">                    continue;</span>
+                }
+<span class="fc" id="L80">                buffer.add(trimmed);</span>
+            }
+<span class="fc" id="L82">            ordinal = flush(chunks, buffer, documentId, page.pageNumber(), currentSection, ordinal);</span>
+<span class="fc" id="L83">        }</span>
+<span class="fc" id="L84">        return chunks;</span>
+    }
+
+    /**
+     * Split buffered text into word-window chunks and append them to the output.
+     *
+     * @param out destination list receiving generated chunks
+     * @param buffer lines of content accumulated for the current section
+     * @param docId identifier used to build chunk identifiers
+     * @param page source page number for the buffered content
+     * @param section active section name for the buffered content
+     * @param ordinal ordinal assigned to the first generated chunk
+     * @return ordinal to assign to the next chunk
+     */
+    private int flush(List&lt;Chunk&gt; out, List&lt;String&gt; buffer, String docId, int page, String section, int ordinal) {
+<span class="fc bfc" id="L99" title="All 2 branches covered.">        if (buffer.isEmpty()) return ordinal;</span>
+<span class="fc" id="L100">        String[] words = String.join(&quot; &quot;, buffer).split(&quot;\\s+&quot;);</span>
+<span class="fc" id="L101">        buffer.clear();</span>
+
+<span class="fc" id="L103">        int start = 0;</span>
+<span class="pc bpc" id="L104" title="1 of 2 branches missed.">        while (start &lt; words.length) {</span>
+<span class="fc" id="L105">            int end = Math.min(words.length, start + chunkWords);</span>
+<span class="fc" id="L106">            String text = String.join(&quot; &quot;, java.util.Arrays.copyOfRange(words, start, end));</span>
+<span class="fc" id="L107">            String id = docId.substring(0, 8) + &quot;-p&quot; + page + &quot;-c&quot; + ordinal;</span>
+<span class="fc" id="L108">            out.add(new Chunk(id, docId, page, section, ordinal, text));</span>
+<span class="fc" id="L109">            ordinal++;</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">            if (end == words.length) break;</span>
+<span class="fc" id="L111">            start = end - overlapWords;</span>
+<span class="fc" id="L112">        }</span>
+<span class="fc" id="L113">        return ordinal;</span>
+    }
+
+    /**
+     * Determine whether a line matches one of the supported section headings.
+     *
+     * @param line trimmed candidate heading
+     * @return {@code true} if the line is at most 60 characters and matches a recognized heading
+     */
+    private boolean isHeading(String line) {
+<span class="pc bpc" id="L123" title="1 of 4 branches missed.">        return line.length() &lt;= 60 &amp;&amp; SECTION_HEADING.matcher(line).matches();</span>
+    }
+
+    /**
+     * Remove an optional numeric or Roman-numeral prefix and normalize a heading's capitalization.
+     *
+     * @param line recognized heading line
+     * @return normalized section name
+     */
+    private String normalizeHeading(String line) {
+<span class="fc" id="L133">        String h = line.replaceFirst(&quot;^\\s*(?:\\d+(?:\\.\\d+)*|[IVX]+)\\.?\\s+&quot;, &quot;&quot;).trim();</span>
+<span class="fc" id="L134">        return Character.toUpperCase(h.charAt(0)) + h.substring(1).toLowerCase();</span>
+    }
+
+    /**
+     * Normalize line endings, broken words, control characters, ligatures, and repeated whitespace.
+     *
+     * @param raw extracted text; {@code null} is treated as empty text
+     * @return cleaned text with leading and trailing whitespace removed
+     */
+    String clean(String raw) {
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">        if (raw == null) return &quot;&quot;;</span>
+<span class="fc" id="L145">        String t = raw.replace(&quot;\r&quot;, &quot;&quot;);</span>
+<span class="fc" id="L146">        t = HYPHEN_BREAK.matcher(t).replaceAll(&quot;$1$2&quot;);      // re-join hyphenated line breaks</span>
+<span class="fc" id="L147">        t = t.replaceAll(&quot;[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]&quot;, &quot;&quot;);</span>
+<span class="fc" id="L148">        t = t.replaceAll(&quot;\\uFB01&quot;, &quot;fi&quot;).replaceAll(&quot;\\uFB02&quot;, &quot;fl&quot;);</span>
+<span class="fc" id="L149">        t = MULTI_SPACE.matcher(t).replaceAll(&quot; &quot;);</span>
+<span class="fc" id="L150">        t = MULTI_NEWLINE.matcher(t).replaceAll(&quot;\n\n&quot;);</span>
+<span class="fc" id="L151">        return t.trim();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

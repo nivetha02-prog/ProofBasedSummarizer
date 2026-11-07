@@ -10,12 +10,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * "Proof-based summary": instead of free summarising, it asks a fixed set of
- * research questions and returns each answer with its page/section evidence.
+ * Produce a proof-based summary by answering a fixed set of research questions
+ * and retaining the evidence returned for each answer.
  */
 @Service
 public class SummaryService {
 
+    /** Map summary aspect names to the questions used to retrieve and answer each aspect. */
     private static final Map<String, String> ASPECTS = new LinkedHashMap<>();
     static {
         ASPECTS.put("problem",      "What problem or research question does this paper address?");
@@ -26,14 +27,28 @@ public class SummaryService {
         ASPECTS.put("contribution", "What are the stated contributions or conclusions?");
     }
 
+    /** Retrieve supporting passages for each aspect. */
     private final RetrievalService retrieval;
+    /** Generate an evidence-associated answer for each aspect. */
     private final LlmService llm;
 
+    /**
+     * Create summary generation with retrieval and answering collaborators.
+     *
+     * @param retrieval service used to find passages for each summary question
+     * @param llm service used to produce each answer
+     */
     public SummaryService(RetrievalService retrieval, LlmService llm) {
         this.retrieval = retrieval;
         this.llm = llm;
     }
 
+    /**
+     * Answer every configured summary question for a document.
+     *
+     * @param documentId identifier of the document to summarize
+     * @return insertion-ordered mapping from aspect names to their answers
+     */
     public Map<String, AnswerResponse> summarize(String documentId) {
         Map<String, AnswerResponse> out = new LinkedHashMap<>();
         for (Map.Entry<String, String> a : ASPECTS.entrySet()) {
@@ -43,5 +58,10 @@ public class SummaryService {
         return out;
     }
 
+    /**
+     * List the configured summary aspect names in processing order.
+     *
+     * @return a new list of aspect names
+     */
     public List<String> aspects() { return new ArrayList<>(ASPECTS.keySet()); }
 }

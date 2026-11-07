@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PaperController.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ProofSum</a> &gt; <a href="index.source.html" class="el_package">com.proofsum.controller</a> &gt; <span class="el_source">PaperController.java</span></div><h1>PaperController.java</h1><pre class="source lang-java linenums">package com.proofsum.controller;
+
+import com.proofsum.model.*;
+import com.proofsum.service.*;
+import com.proofsum.store.VectorStore;
+import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Expose endpoints for uploading research papers, asking document questions,
+ * retrieving summaries and metadata, and deleting documents.
+ */
+@RestController
+@RequestMapping(&quot;/api/papers&quot;)
+@CrossOrigin
+public class PaperController {
+
+    /** Validate, temporarily store, and extract text from uploaded PDFs. */
+    private final PdfProcessingService pdf;
+    /** Split extracted page text into evidence-bearing chunks. */
+    private final ChunkingService chunking;
+    /** Index document chunks and retrieve relevant passages. */
+    private final RetrievalService retrieval;
+    /** Generate answers from retrieved evidence. */
+    private final LlmService llm;
+    /** Generate fixed-aspect summaries. */
+    private final SummaryService summary;
+    /** Store document vectors and registered metadata. */
+    private final VectorStore store;
+
+    /**
+     * Create the paper API controller with its processing and storage collaborators.
+     *
+     * @param pdf service for uploaded PDF processing
+     * @param chunking service for converting page text into chunks
+     * @param retrieval service for indexing and searching chunks
+     * @param llm service for evidence-grounded answers
+     * @param summary service for fixed-aspect summaries
+     * @param store vector store holding document metadata and chunks
+     */
+    public PaperController(PdfProcessingService pdf, ChunkingService chunking, RetrievalService retrieval,
+<span class="nc" id="L49">                           LlmService llm, SummaryService summary, VectorStore store) {</span>
+<span class="nc" id="L50">        this.pdf = pdf; this.chunking = chunking; this.retrieval = retrieval;</span>
+<span class="nc" id="L51">        this.llm = llm; this.summary = summary; this.store = store;</span>
+<span class="nc" id="L52">    }</span>
+
+    /**
+     * Accept and process a PDF upload, index its chunks, and register document metadata.
+     *
+     * @param file multipart file supplied in the {@code file} request part
+     * @return assigned document identifier, original file name, page and chunk counts, and sections
+     * @throws IOException if the upload cannot be stored or the PDF cannot be read
+     * @throws IllegalArgumentException if the PDF is invalid or yields no usable chunks
+     */
+    @PostMapping
+    public UploadResponse upload(@RequestParam(&quot;file&quot;) MultipartFile file) throws IOException {
+<span class="nc" id="L64">        String documentId = PdfProcessingService.newDocumentId();</span>
+<span class="nc" id="L65">        Path stored = pdf.store(file, documentId);</span>
+        try {
+<span class="nc" id="L67">            List&lt;PageText&gt; pages = pdf.extractPages(stored);</span>
+<span class="nc" id="L68">            List&lt;Chunk&gt; chunks = chunking.chunk(documentId, pages);</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">            if (chunks.isEmpty()) throw new IllegalArgumentException(&quot;No usable text could be chunked from this PDF.&quot;);</span>
+
+<span class="nc" id="L71">            retrieval.index(documentId, chunks);</span>
+<span class="nc" id="L72">            List&lt;String&gt; sections = chunks.stream().map(Chunk::section).distinct().toList();</span>
+<span class="nc" id="L73">            store.registerDocument(new VectorStore.DocumentInfo(documentId, file.getOriginalFilename(), pages.size(), sections));</span>
+
+<span class="nc" id="L75">            return new UploadResponse(documentId, file.getOriginalFilename(), pages.size(), chunks.size(), sections);</span>
+        } finally {
+<span class="nc" id="L77">            pdf.delete(stored);   // temporary storage only; the chunks live in the vector store</span>
+        }
+    }
+
+    /**
+     * Answer a question about an already registered document.
+     *
+     * @param req request containing the document identifier and non-blank question
+     * @return answer and its associated evidence
+     * @throws DocumentNotFoundException if the requested document is not registered
+     */
+    @PostMapping(&quot;/ask&quot;)
+    public AnswerResponse ask(@Valid @RequestBody QuestionRequest req) {
+<span class="nc" id="L90">        requireDocument(req.documentId());</span>
+<span class="nc" id="L91">        List&lt;ScoredChunk&gt; hits = retrieval.retrieve(req.documentId(), req.question());</span>
+<span class="nc" id="L92">        return llm.answer(req.documentId(), req.question(), hits);</span>
+    }
+
+    /**
+     * Generate the configured summary aspects for a registered document.
+     *
+     * @param id identifier of the document to summarize
+     * @return mapping from summary aspect names to answers
+     * @throws DocumentNotFoundException if the requested document is not registered
+     */
+    @GetMapping(&quot;/{id}/summary&quot;)
+    public Map&lt;String, AnswerResponse&gt; summarize(@PathVariable String id) {
+<span class="nc" id="L104">        requireDocument(id);</span>
+<span class="nc" id="L105">        return summary.summarize(id);</span>
+    }
+
+    /**
+     * Return metadata for a registered document.
+     *
+     * @param id identifier of the document to inspect
+     * @return registered document metadata
+     * @throws DocumentNotFoundException if the requested document is not registered
+     */
+    @GetMapping(&quot;/{id}&quot;)
+    public VectorStore.DocumentInfo info(@PathVariable String id) {
+<span class="nc" id="L117">        return requireDocument(id);</span>
+    }
+
+    /**
+     * Delete a document's vectors and metadata.
+     *
+     * @param id identifier of the document to delete
+     * @return an empty {@code 204 No Content} response
+     */
+    @DeleteMapping(&quot;/{id}&quot;)
+    public ResponseEntity&lt;Void&gt; delete(@PathVariable String id) {
+<span class="nc" id="L128">        store.delete(id);</span>
+<span class="nc" id="L129">        return ResponseEntity.noContent().build();</span>
+    }
+
+    /**
+     * Resolve registered metadata or raise the controller's not-found exception.
+     *
+     * @param id identifier of the document to resolve
+     * @return registered metadata
+     * @throws DocumentNotFoundException if no metadata is registered for the identifier
+     */
+    private VectorStore.DocumentInfo requireDocument(String id) {
+<span class="nc" id="L140">        return store.document(id).orElseThrow(() -&gt;</span>
+<span class="nc" id="L141">                new DocumentNotFoundException(&quot;No document with id &quot; + id + &quot;. Upload a PDF first.&quot;));</span>
+    }
+
+    /**
+     * Signal that an API operation requires a document that is not registered.
+     */
+    public static class DocumentNotFoundException extends RuntimeException {
+
+        /**
+         * Create a document-not-found exception with a descriptive message.
+         *
+         * @param m detail explaining which document was not found
+         */
+<span class="nc" id="L154">        public DocumentNotFoundException(String m) { super(m); }</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

@@ -18,23 +18,39 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Turns text into dense vectors. Two providers:
- *  - "local": offline hashed term-frequency vectors (no API key, decent lexical retrieval)
- *  - "openai": any OpenAI-compatible /v1/embeddings endpoint
+ * Convert text to vectors using local hashed term-frequency features or a configured
+ * OpenAI-compatible embeddings endpoint.
  */
 @Service
 public class EmbeddingService {
 
+    /** Number of dimensions used by the local hashed-vector representation. */
     private static final int LOCAL_DIM = 4096;
+    /** Token pattern used by the local text representation. */
     private static final Pattern TOKEN = Pattern.compile("[a-z0-9]+");
 
+    /** Selected embedding provider; a missing API key forces local mode. */
     private final String provider;
+
+    /** Configured remote embeddings endpoint. */
     private final String openaiUrl;
+    /** Model name supplied to the remote endpoint. */
     private final String openaiModel;
+    /** Credential used for remote requests, if configured. */
     private final String openaiKey;
+    /** HTTP client used for remote embedding requests. */
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
+    /** JSON mapper used to encode requests and decode responses. */
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /**
+     * Configure local or OpenAI-compatible embeddings.
+     *
+     * @param provider requested provider name
+     * @param openaiUrl remote embeddings endpoint
+     * @param openaiModel model name sent to the remote endpoint
+     * @param openaiKey remote API key; a null or blank value selects the local provider
+     */
     public EmbeddingService(@Value("${proofsum.embedding.provider}") String provider,
                             @Value("${proofsum.embedding.openai.url}") String openaiUrl,
                             @Value("${proofsum.embedding.openai.model}") String openaiModel,
@@ -45,12 +61,30 @@ public class EmbeddingService {
         this.openaiKey = openaiKey;
     }
 
+    /**
+     * Return the effective provider selected by this service.
+     *
+     * @return provider name, including {@code local} when no remote key is configured
+     */
     public String provider() { return provider; }
 
+    /**
+     * Embed one text value using the configured provider and fallback behavior.
+     *
+     * @param text text to convert to a vector
+     * @return vector corresponding to the text
+     * @throws NullPointerException if {@code text} is null
+     */
     public float[] embed(String text) {
         return embedAll(List.of(text)).get(0);
     }
 
+    /**
+     * Embed a batch of texts, falling back to local vectors if a remote request fails.
+     *
+     * @param texts texts to convert, in output order
+     * @return one vector per input text, in the same order
+     */
     public List<float[]> embedAll(List<String> texts) {
         if ("openai".equalsIgnoreCase(provider)) {
             try {
@@ -65,8 +99,12 @@ public class EmbeddingService {
         return out;
     }
 
-    /* ---------- local hashed TF vector with bigrams and sub-linear scaling ---------- */
-
+    /**
+     * Build a normalized local vector from hashed tokens and adjacent-token features.
+     *
+     * @param text text to tokenize and represent
+     * @return normalized vector of {@value #LOCAL_DIM} dimensions, or a zero vector when no terms remain
+     */
     private float[] embedLocal(String text) {
         float[] v = new float[LOCAL_DIM];
         Matcher m = TOKEN.matcher(text.toLowerCase());
@@ -89,11 +127,22 @@ public class EmbeddingService {
         return v;
     }
 
+    /**
+     * Map a token or token pair deterministically into the local vector dimensions.
+     *
+     * @param s token or token-pair feature to map
+     * @return vector index in the range from zero to {@code LOCAL_DIM - 1}
+     */
     private static int bucket(String s) {
         return Math.floorMod(s.hashCode() * 31 + 7, LOCAL_DIM);
     }
 
-    /** Very small suffix stemmer: enough to match "models" with "model". */
+    /**
+     * Remove one supported suffix to improve simple lexical matching.
+     *
+     * @param w lowercase token to stem
+     * @return token with a recognized suffix removed, or the original token
+     */
     private static String stem(String w) {
         if (w.length() > 5 && w.endsWith("ing")) return w.substring(0, w.length() - 3);
         if (w.length() > 4 && w.endsWith("ies")) return w.substring(0, w.length() - 3) + "y";
@@ -102,14 +151,21 @@ public class EmbeddingService {
         return w;
     }
 
+    /** Terms excluded from local vector features. */
     private static final java.util.Set<String> STOP = java.util.Set.of(
             "the","a","an","and","or","of","to","in","on","for","with","is","are","was","were","be","been",
             "by","as","at","that","this","these","those","it","its","from","we","our","which","can","has",
             "have","had","not","but","also","than","their","there","into","such","using","used","use",
             "what","how","does","do","did","why","when","where","who","paper","study","show","shows");
 
-    /* ---------- remote OpenAI-compatible embeddings ---------- */
-
+    /**
+     * Request vectors from the configured OpenAI-compatible endpoint.
+     *
+     * @param texts input texts in request order
+     * @return vectors parsed from the endpoint response
+     * @throws IOException if request serialization, transport, response status, or response parsing fails
+     * @throws InterruptedException if the request is interrupted
+     */
     private List<float[]> embedRemote(List<String> texts) throws IOException, InterruptedException {
         String body = mapper.writeValueAsString(Map.of("model", openaiModel, "input", texts));
         HttpRequest req = HttpRequest.newBuilder(URI.create(openaiUrl))

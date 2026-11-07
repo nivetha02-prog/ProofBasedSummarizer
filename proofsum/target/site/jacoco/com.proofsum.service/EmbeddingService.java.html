@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>EmbeddingService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ProofSum</a> &gt; <a href="index.source.html" class="el_package">com.proofsum.service</a> &gt; <span class="el_source">EmbeddingService.java</span></div><h1>EmbeddingService.java</h1><pre class="source lang-java linenums">package com.proofsum.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Convert text to vectors using local hashed term-frequency features or a configured
+ * OpenAI-compatible embeddings endpoint.
+ */
+@Service
+public class EmbeddingService {
+
+    /** Number of dimensions used by the local hashed-vector representation. */
+    private static final int LOCAL_DIM = 4096;
+    /** Token pattern used by the local text representation. */
+<span class="fc" id="L30">    private static final Pattern TOKEN = Pattern.compile(&quot;[a-z0-9]+&quot;);</span>
+
+    /** Selected embedding provider; a missing API key forces local mode. */
+    private final String provider;
+
+    /** Configured remote embeddings endpoint. */
+    private final String openaiUrl;
+    /** Model name supplied to the remote endpoint. */
+    private final String openaiModel;
+    /** Credential used for remote requests, if configured. */
+    private final String openaiKey;
+    /** HTTP client used for remote embedding requests. */
+<span class="fc" id="L42">    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();</span>
+    /** JSON mapper used to encode requests and decode responses. */
+<span class="fc" id="L44">    private final ObjectMapper mapper = new ObjectMapper();</span>
+
+    /**
+     * Configure local or OpenAI-compatible embeddings.
+     *
+     * @param provider requested provider name
+     * @param openaiUrl remote embeddings endpoint
+     * @param openaiModel model name sent to the remote endpoint
+     * @param openaiKey remote API key; a null or blank value selects the local provider
+     */
+    public EmbeddingService(@Value(&quot;${proofsum.embedding.provider}&quot;) String provider,
+                            @Value(&quot;${proofsum.embedding.openai.url}&quot;) String openaiUrl,
+                            @Value(&quot;${proofsum.embedding.openai.model}&quot;) String openaiModel,
+<span class="fc" id="L57">                            @Value(&quot;${proofsum.embedding.openai.api-key}&quot;) String openaiKey) {</span>
+<span class="pc bpc" id="L58" title="2 of 4 branches missed.">        this.provider = (openaiKey == null || openaiKey.isBlank()) ? &quot;local&quot; : provider;</span>
+<span class="fc" id="L59">        this.openaiUrl = openaiUrl;</span>
+<span class="fc" id="L60">        this.openaiModel = openaiModel;</span>
+<span class="fc" id="L61">        this.openaiKey = openaiKey;</span>
+<span class="fc" id="L62">    }</span>
+
+    /**
+     * Return the effective provider selected by this service.
+     *
+     * @return provider name, including {@code local} when no remote key is configured
+     */
+<span class="fc" id="L69">    public String provider() { return provider; }</span>
+
+    /**
+     * Embed one text value using the configured provider and fallback behavior.
+     *
+     * @param text text to convert to a vector
+     * @return vector corresponding to the text
+     * @throws NullPointerException if {@code text} is null
+     */
+    public float[] embed(String text) {
+<span class="fc" id="L79">        return embedAll(List.of(text)).get(0);</span>
+    }
+
+    /**
+     * Embed a batch of texts, falling back to local vectors if a remote request fails.
+     *
+     * @param texts texts to convert, in output order
+     * @return one vector per input text, in the same order
+     */
+    public List&lt;float[]&gt; embedAll(List&lt;String&gt; texts) {
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">        if (&quot;openai&quot;.equalsIgnoreCase(provider)) {</span>
+            try {
+<span class="nc" id="L91">                return embedRemote(texts);</span>
+<span class="nc" id="L92">            } catch (Exception e) {</span>
+                // Fall back so the app keeps working if the API is down.
+<span class="nc" id="L94">                System.err.println(&quot;[EmbeddingService] remote failed, using local: &quot; + e.getMessage());</span>
+            }
+        }
+<span class="fc" id="L97">        List&lt;float[]&gt; out = new ArrayList&lt;&gt;(texts.size());</span>
+<span class="fc bfc" id="L98" title="All 2 branches covered.">        for (String t : texts) out.add(embedLocal(t));</span>
+<span class="fc" id="L99">        return out;</span>
+    }
+
+    /**
+     * Build a normalized local vector from hashed tokens and adjacent-token features.
+     *
+     * @param text text to tokenize and represent
+     * @return normalized vector of {@value #LOCAL_DIM} dimensions, or a zero vector when no terms remain
+     */
+    private float[] embedLocal(String text) {
+<span class="fc" id="L109">        float[] v = new float[LOCAL_DIM];</span>
+<span class="fc" id="L110">        Matcher m = TOKEN.matcher(text.toLowerCase());</span>
+<span class="fc" id="L111">        String prev = null;</span>
+<span class="fc bfc" id="L112" title="All 2 branches covered.">        while (m.find()) {</span>
+<span class="fc" id="L113">            String tok = m.group();</span>
+<span class="pc bpc" id="L114" title="2 of 4 branches missed.">            if (tok.length() &lt; 2 || STOP.contains(tok)) { prev = null; continue; }</span>
+<span class="fc" id="L115">            tok = stem(tok);</span>
+<span class="fc" id="L116">            v[bucket(tok)] += 1f;</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">            if (prev != null) v[bucket(prev + &quot;_&quot; + tok)] += 0.6f;</span>
+<span class="fc" id="L118">            prev = tok;</span>
+<span class="fc" id="L119">        }</span>
+<span class="fc" id="L120">        double norm = 0;</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">        for (int i = 0; i &lt; LOCAL_DIM; i++) {</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">            if (v[i] &gt; 0) v[i] = (float) (1 + Math.log(v[i]));</span>
+<span class="fc" id="L123">            norm += v[i] * v[i];</span>
+        }
+<span class="fc" id="L125">        norm = Math.sqrt(norm);</span>
+<span class="pc bpc" id="L126" title="1 of 4 branches missed.">        if (norm &gt; 0) for (int i = 0; i &lt; LOCAL_DIM; i++) v[i] /= norm;</span>
+<span class="fc" id="L127">        return v;</span>
+    }
+
+    /**
+     * Map a token or token pair deterministically into the local vector dimensions.
+     *
+     * @param s token or token-pair feature to map
+     * @return vector index in the range from zero to {@code LOCAL_DIM - 1}
+     */
+    private static int bucket(String s) {
+<span class="fc" id="L137">        return Math.floorMod(s.hashCode() * 31 + 7, LOCAL_DIM);</span>
+    }
+
+    /**
+     * Remove one supported suffix to improve simple lexical matching.
+     *
+     * @param w lowercase token to stem
+     * @return token with a recognized suffix removed, or the original token
+     */
+    private static String stem(String w) {
+<span class="pc bpc" id="L147" title="1 of 4 branches missed.">        if (w.length() &gt; 5 &amp;&amp; w.endsWith(&quot;ing&quot;)) return w.substring(0, w.length() - 3);</span>
+<span class="pc bpc" id="L148" title="2 of 4 branches missed.">        if (w.length() &gt; 4 &amp;&amp; w.endsWith(&quot;ies&quot;)) return w.substring(0, w.length() - 3) + &quot;y&quot;;</span>
+<span class="pc bpc" id="L149" title="2 of 4 branches missed.">        if (w.length() &gt; 4 &amp;&amp; w.endsWith(&quot;es&quot;))  return w.substring(0, w.length() - 2);</span>
+<span class="pc bpc" id="L150" title="2 of 6 branches missed.">        if (w.length() &gt; 3 &amp;&amp; w.endsWith(&quot;s&quot;) &amp;&amp; !w.endsWith(&quot;ss&quot;)) return w.substring(0, w.length() - 1);</span>
+<span class="fc" id="L151">        return w;</span>
+    }
+
+    /** Terms excluded from local vector features. */
+<span class="fc" id="L155">    private static final java.util.Set&lt;String&gt; STOP = java.util.Set.of(</span>
+            &quot;the&quot;,&quot;a&quot;,&quot;an&quot;,&quot;and&quot;,&quot;or&quot;,&quot;of&quot;,&quot;to&quot;,&quot;in&quot;,&quot;on&quot;,&quot;for&quot;,&quot;with&quot;,&quot;is&quot;,&quot;are&quot;,&quot;was&quot;,&quot;were&quot;,&quot;be&quot;,&quot;been&quot;,
+            &quot;by&quot;,&quot;as&quot;,&quot;at&quot;,&quot;that&quot;,&quot;this&quot;,&quot;these&quot;,&quot;those&quot;,&quot;it&quot;,&quot;its&quot;,&quot;from&quot;,&quot;we&quot;,&quot;our&quot;,&quot;which&quot;,&quot;can&quot;,&quot;has&quot;,
+            &quot;have&quot;,&quot;had&quot;,&quot;not&quot;,&quot;but&quot;,&quot;also&quot;,&quot;than&quot;,&quot;their&quot;,&quot;there&quot;,&quot;into&quot;,&quot;such&quot;,&quot;using&quot;,&quot;used&quot;,&quot;use&quot;,
+            &quot;what&quot;,&quot;how&quot;,&quot;does&quot;,&quot;do&quot;,&quot;did&quot;,&quot;why&quot;,&quot;when&quot;,&quot;where&quot;,&quot;who&quot;,&quot;paper&quot;,&quot;study&quot;,&quot;show&quot;,&quot;shows&quot;);
+
+    /**
+     * Request vectors from the configured OpenAI-compatible endpoint.
+     *
+     * @param texts input texts in request order
+     * @return vectors parsed from the endpoint response
+     * @throws IOException if request serialization, transport, response status, or response parsing fails
+     * @throws InterruptedException if the request is interrupted
+     */
+    private List&lt;float[]&gt; embedRemote(List&lt;String&gt; texts) throws IOException, InterruptedException {
+<span class="nc" id="L170">        String body = mapper.writeValueAsString(Map.of(&quot;model&quot;, openaiModel, &quot;input&quot;, texts));</span>
+<span class="nc" id="L171">        HttpRequest req = HttpRequest.newBuilder(URI.create(openaiUrl))</span>
+<span class="nc" id="L172">                .header(&quot;Content-Type&quot;, &quot;application/json&quot;)</span>
+<span class="nc" id="L173">                .header(&quot;Authorization&quot;, &quot;Bearer &quot; + openaiKey)</span>
+<span class="nc" id="L174">                .timeout(Duration.ofSeconds(60))</span>
+<span class="nc" id="L175">                .POST(HttpRequest.BodyPublishers.ofString(body))</span>
+<span class="nc" id="L176">                .build();</span>
+<span class="nc" id="L177">        HttpResponse&lt;String&gt; res = http.send(req, HttpResponse.BodyHandlers.ofString());</span>
+<span class="nc bnc" id="L178" title="All 2 branches missed.">        if (res.statusCode() / 100 != 2) throw new IOException(&quot;HTTP &quot; + res.statusCode() + &quot;: &quot; + res.body());</span>
+
+<span class="nc" id="L180">        JsonNode data = mapper.readTree(res.body()).get(&quot;data&quot;);</span>
+<span class="nc" id="L181">        List&lt;float[]&gt; out = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L182" title="All 2 branches missed.">        for (JsonNode item : data) {</span>
+<span class="nc" id="L183">            JsonNode arr = item.get(&quot;embedding&quot;);</span>
+<span class="nc" id="L184">            float[] v = new float[arr.size()];</span>
+<span class="nc bnc" id="L185" title="All 2 branches missed.">            for (int i = 0; i &lt; arr.size(); i++) v[i] = (float) arr.get(i).asDouble();</span>
+<span class="nc" id="L186">            out.add(v);</span>
+<span class="nc" id="L187">        }</span>
+<span class="nc" id="L188">        return out;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>InMemoryVectorStore.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ProofSum</a> &gt; <a href="index.source.html" class="el_package">com.proofsum.store</a> &gt; <span class="el_source">InMemoryVectorStore.java</span></div><h1>InMemoryVectorStore.java</h1><pre class="source lang-java linenums">package com.proofsum.store;
+
+import com.proofsum.model.Chunk;
+import com.proofsum.model.ScoredChunk;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Store document chunks and their vectors in process memory and rank them by cosine similarity.
+ * The implementation uses concurrent maps for document-level storage and is intended for
+ * deployments whose indexed data need not be persisted outside the running process.
+ */
+@Component
+<span class="fc" id="L16">public class InMemoryVectorStore implements VectorStore {</span>
+
+    /**
+     * Associate one indexed chunk with the vector used to search for it.
+     *
+     * @param chunk indexed passage and its source metadata
+     * @param vector vector compared with query vectors during search
+     */
+<span class="fc" id="L24">    private record Entry(Chunk chunk, float[] vector) {}</span>
+
+    /** Hold indexed chunks and vectors grouped by document identifier. */
+<span class="fc" id="L27">    private final Map&lt;String, List&lt;Entry&gt;&gt; byDocument = new ConcurrentHashMap&lt;&gt;();</span>
+    /** Hold registered document metadata grouped by document identifier. */
+<span class="fc" id="L29">    private final Map&lt;String, DocumentInfo&gt; docs = new ConcurrentHashMap&lt;&gt;();</span>
+
+    /**
+     * Replace all indexed entries for a document with the supplied chunks and vectors.
+     *
+     * @param documentId identifier used to group the indexed entries
+     * @param chunks chunks to index
+     * @param vectors vectors corresponding by index to {@code chunks}
+     */
+    @Override
+    public void upsert(String documentId, List&lt;Chunk&gt; chunks, List&lt;float[]&gt; vectors) {
+<span class="fc" id="L40">        List&lt;Entry&gt; entries = new ArrayList&lt;&gt;(chunks.size());</span>
+<span class="fc bfc" id="L41" title="All 2 branches covered.">        for (int i = 0; i &lt; chunks.size(); i++) entries.add(new Entry(chunks.get(i), vectors.get(i)));</span>
+<span class="fc" id="L42">        byDocument.put(documentId, entries);</span>
+<span class="fc" id="L43">    }</span>
+
+    /**
+     * Return up to {@code topK} chunks for a document, ranked by descending cosine similarity.
+     *
+     * @param documentId identifier of the document to search
+     * @param query query vector compared against each stored vector
+     * @param topK maximum number of chunks to return
+     * @return matching chunks in descending similarity order, or an empty list when the document
+     *         has no indexed entries
+     */
+    @Override
+    public List&lt;ScoredChunk&gt; search(String documentId, float[] query, int topK) {
+<span class="fc" id="L56">        List&lt;Entry&gt; entries = byDocument.get(documentId);</span>
+<span class="fc bfc" id="L57" title="All 2 branches covered.">        if (entries == null) return List.of();</span>
+<span class="fc" id="L58">        PriorityQueue&lt;ScoredChunk&gt; heap = new PriorityQueue&lt;&gt;(Comparator.comparingDouble(ScoredChunk::score));</span>
+<span class="fc bfc" id="L59" title="All 2 branches covered.">        for (Entry e : entries) {</span>
+<span class="fc" id="L60">            double s = cosine(query, e.vector());</span>
+<span class="fc bfc" id="L61" title="All 2 branches covered.">            if (heap.size() &lt; topK) heap.add(new ScoredChunk(e.chunk(), s));</span>
+<span class="pc bpc" id="L62" title="1 of 2 branches missed.">            else if (s &gt; heap.peek().score()) { heap.poll(); heap.add(new ScoredChunk(e.chunk(), s)); }</span>
+<span class="fc" id="L63">        }</span>
+<span class="fc" id="L64">        List&lt;ScoredChunk&gt; out = new ArrayList&lt;&gt;(heap);</span>
+<span class="pc" id="L65">        out.sort((a, b) -&gt; Double.compare(b.score(), a.score()));</span>
+<span class="fc" id="L66">        return out;</span>
+    }
+
+    /**
+     * Look up metadata currently registered for a document.
+     *
+     * @param documentId identifier of the document to look up
+     * @return the metadata when present, otherwise an empty optional
+     */
+    @Override
+    public Optional&lt;DocumentInfo&gt; document(String documentId) {
+<span class="fc" id="L77">        return Optional.ofNullable(docs.get(documentId));</span>
+    }
+
+    /**
+     * Register or replace a document's metadata.
+     *
+     * @param info metadata to store, keyed by its document identifier
+     */
+    @Override
+    public void registerDocument(DocumentInfo info) {
+<span class="fc" id="L87">        docs.put(info.documentId(), info);</span>
+<span class="fc" id="L88">    }</span>
+
+    /**
+     * Remove a document's indexed entries and registered metadata.
+     *
+     * @param documentId identifier of the document to remove
+     */
+    @Override
+    public void delete(String documentId) {
+<span class="fc" id="L97">        byDocument.remove(documentId);</span>
+<span class="fc" id="L98">        docs.remove(documentId);</span>
+<span class="fc" id="L99">    }</span>
+
+    /**
+     * Calculate cosine similarity, treating vectors of different dimensions or zero norm as dissimilar.
+     *
+     * @param a first vector
+     * @param b second vector
+     * @return cosine similarity, or zero when dimensions differ or either vector has zero norm
+     */
+    private static double cosine(float[] a, float[] b) {
+<span class="pc bpc" id="L109" title="1 of 2 branches missed.">        if (a.length != b.length) return 0;</span>
+<span class="fc" id="L110">        double dot = 0, na = 0, nb = 0;</span>
+<span class="fc bfc" id="L111" title="All 2 branches covered.">        for (int i = 0; i &lt; a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }</span>
+<span class="pc bpc" id="L112" title="2 of 4 branches missed.">        return (na == 0 || nb == 0) ? 0 : dot / (Math.sqrt(na) * Math.sqrt(nb));</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

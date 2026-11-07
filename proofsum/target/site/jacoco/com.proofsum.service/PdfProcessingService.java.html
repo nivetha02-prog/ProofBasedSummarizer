@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>PdfProcessingService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ProofSum</a> &gt; <a href="index.source.html" class="el_package">com.proofsum.service</a> &gt; <span class="el_source">PdfProcessingService.java</span></div><h1>PdfProcessingService.java</h1><pre class="source lang-java linenums">package com.proofsum.service;
+
+import com.proofsum.model.PageText;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Validate uploaded PDF content, temporarily store accepted files, and extract page-level text.
+ */
+@Service
+public class PdfProcessingService {
+
+    /** Absolute directory used for temporary PDF copies. */
+    private final Path storageDir;
+
+    /**
+     * Create the temporary storage directory when it does not already exist.
+     *
+     * @param storageDir configured directory for temporary PDF files
+     * @throws IOException if the directory cannot be created
+     */
+<span class="nc" id="L34">    public PdfProcessingService(@Value(&quot;${proofsum.storage.dir}&quot;) String storageDir) throws IOException {</span>
+<span class="nc" id="L35">        this.storageDir = Paths.get(storageDir).toAbsolutePath();</span>
+<span class="nc" id="L36">        Files.createDirectories(this.storageDir);</span>
+<span class="nc" id="L37">    }</span>
+
+    /**
+     * Validate and copy an uploaded PDF to temporary storage.
+     *
+     * @param file uploaded file; must be non-null, non-empty, and have a PDF name or media type
+     *             and a {@code %PDF-} header
+     * @param documentId identifier used to name the stored file
+     * @return path to the temporary PDF copy
+     * @throws IOException if the upload stream cannot be read or the copy cannot be written
+     * @throws IllegalArgumentException if the file is absent, empty, not identified as a PDF,
+     *                                  or lacks a PDF header
+     */
+    public Path store(MultipartFile file, String documentId) throws IOException {
+<span class="nc" id="L51">        validate(file);</span>
+<span class="nc" id="L52">        Path target = storageDir.resolve(documentId + &quot;.pdf&quot;);</span>
+<span class="nc" id="L53">        Files.copy(file.getInputStream(), target);</span>
+<span class="nc" id="L54">        return target;</span>
+    }
+
+    /**
+     * Extract text for each page of a readable, non-empty PDF.
+     *
+     * @param pdfPath path to the PDF to read
+     * @return page text entries in document order, including entries for blank pages
+     * @throws IllegalArgumentException if the PDF is encrypted, has no pages, has no extractable
+     *                                  text, or cannot be read as a PDF
+     * @throws IOException declared by the method signature; I/O errors caught during PDF processing
+     *                      are wrapped in {@link IllegalArgumentException}
+     */
+    public List&lt;PageText&gt; extractPages(Path pdfPath) throws IOException {
+<span class="nc" id="L68">        try (PDDocument doc = Loader.loadPDF(pdfPath.toFile())) {</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">            if (doc.isEncrypted()) {</span>
+<span class="nc" id="L70">                throw new IllegalArgumentException(&quot;The PDF is encrypted and cannot be read.&quot;);</span>
+            }
+<span class="nc" id="L72">            int pageCount = doc.getNumberOfPages();</span>
+<span class="nc bnc" id="L73" title="All 2 branches missed.">            if (pageCount == 0) {</span>
+<span class="nc" id="L74">                throw new IllegalArgumentException(&quot;The PDF contains no pages.&quot;);</span>
+            }
+
+<span class="nc" id="L77">            PDFTextStripper stripper = new PDFTextStripper();</span>
+<span class="nc" id="L78">            stripper.setSortByPosition(true);</span>
+<span class="nc" id="L79">            List&lt;PageText&gt; pages = new ArrayList&lt;&gt;(pageCount);</span>
+<span class="nc" id="L80">            int nonEmpty = 0;</span>
+
+<span class="nc bnc" id="L82" title="All 2 branches missed.">            for (int p = 1; p &lt;= pageCount; p++) {</span>
+<span class="nc" id="L83">                stripper.setStartPage(p);</span>
+<span class="nc" id="L84">                stripper.setEndPage(p);</span>
+<span class="nc" id="L85">                String text = stripper.getText(doc);</span>
+<span class="nc bnc" id="L86" title="All 4 branches missed.">                if (text != null &amp;&amp; !text.isBlank()) nonEmpty++;</span>
+<span class="nc bnc" id="L87" title="All 2 branches missed.">                pages.add(new PageText(p, text == null ? &quot;&quot; : text));</span>
+            }
+
+<span class="nc bnc" id="L90" title="All 2 branches missed.">            if (nonEmpty == 0) {</span>
+<span class="nc" id="L91">                throw new IllegalArgumentException(</span>
+                        &quot;No extractable text found. The PDF may be scanned images; run OCR first.&quot;);
+            }
+<span class="nc" id="L94">            return pages;</span>
+<span class="nc" id="L95">        } catch (IOException e) {</span>
+<span class="nc" id="L96">            throw new IllegalArgumentException(&quot;The PDF appears to be corrupted or unreadable: &quot; + e.getMessage(), e);</span>
+        }
+    }
+
+    /**
+     * Attempt to remove a temporary PDF copy.
+     *
+     * @param pdfPath path to the file to remove; absence is allowed
+     */
+    public void delete(Path pdfPath) {
+<span class="nc" id="L106">        try { Files.deleteIfExists(pdfPath); } catch (IOException ignored) { }</span>
+<span class="nc" id="L107">    }</span>
+
+    /**
+     * Check the upload is present, PDF-identified, and begins with a PDF signature.
+     *
+     * @param file uploaded file to inspect
+     * @throws IOException if reading the upload stream fails
+     * @throws IllegalArgumentException if the file is null or empty, is not identified as a PDF,
+     *                                  or lacks the {@code %PDF-} signature
+     */
+    private void validate(MultipartFile file) throws IOException {
+<span class="nc bnc" id="L118" title="All 4 branches missed.">        if (file == null || file.isEmpty()) {</span>
+<span class="nc" id="L119">            throw new IllegalArgumentException(&quot;No file was uploaded or the file is empty.&quot;);</span>
+        }
+<span class="nc" id="L121">        String name = file.getOriginalFilename();</span>
+<span class="nc bnc" id="L122" title="All 4 branches missed.">        boolean pdfByName = name != null &amp;&amp; name.toLowerCase().endsWith(&quot;.pdf&quot;);</span>
+<span class="nc" id="L123">        boolean pdfByType = &quot;application/pdf&quot;.equalsIgnoreCase(file.getContentType());</span>
+<span class="nc bnc" id="L124" title="All 4 branches missed.">        if (!pdfByName &amp;&amp; !pdfByType) {</span>
+<span class="nc" id="L125">            throw new IllegalArgumentException(&quot;Only PDF files are accepted.&quot;);</span>
+        }
+<span class="nc" id="L127">        byte[] head = file.getInputStream().readNBytes(5);</span>
+<span class="nc bnc" id="L128" title="All 4 branches missed.">        if (head.length &lt; 5 || !new String(head).startsWith(&quot;%PDF-&quot;)) {</span>
+<span class="nc" id="L129">            throw new IllegalArgumentException(&quot;The file is not a valid PDF (missing %PDF header).&quot;);</span>
+        }
+<span class="nc" id="L131">    }</span>
+
+    /**
+     * Generate a random UUID string suitable for identifying a new document.
+     *
+     * @return a newly generated UUID string
+     */
+    public static String newDocumentId() {
+<span class="nc" id="L139">        return UUID.randomUUID().toString();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

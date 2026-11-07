@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RetrievalService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ProofSum</a> &gt; <a href="index.source.html" class="el_package">com.proofsum.service</a> &gt; <span class="el_source">RetrievalService.java</span></div><h1>RetrievalService.java</h1><pre class="source lang-java linenums">package com.proofsum.service;
+
+import com.proofsum.model.Chunk;
+import com.proofsum.model.ScoredChunk;
+import com.proofsum.store.VectorStore;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * Embed document chunks for indexing and retrieve the highest-scoring passages for questions.
+ * Results are limited by the configured top-k value and minimum similarity score.
+ */
+@Service
+public class RetrievalService {
+
+    /** Convert input text to vectors. */
+    private final EmbeddingService embeddings;
+    /** Store and search the indexed vectors. */
+    private final VectorStore store;
+    /** Maximum number of candidates requested from the vector store per retrieval. */
+    private final int topK;
+    /** Minimum score a candidate must meet to be returned. */
+    private final double minScore;
+
+    /**
+     * Create retrieval behavior with embedding, storage, and result-filter settings.
+     *
+     * @param embeddings service used to create document and query vectors
+     * @param store vector storage implementation
+     * @param topK maximum number of candidates requested from the store
+     * @param minScore minimum inclusive similarity score for returned candidates
+     */
+    public RetrievalService(EmbeddingService embeddings, VectorStore store,
+                            @Value(&quot;${proofsum.retrieval.top-k}&quot;) int topK,
+<span class="fc" id="L38">                            @Value(&quot;${proofsum.retrieval.min-score}&quot;) double minScore) {</span>
+<span class="fc" id="L39">        this.embeddings = embeddings;</span>
+<span class="fc" id="L40">        this.store = store;</span>
+<span class="fc" id="L41">        this.topK = topK;</span>
+<span class="fc" id="L42">        this.minScore = minScore;</span>
+<span class="fc" id="L43">    }</span>
+
+    /**
+     * Embed each chunk's text and replace the document's indexed entries.
+     *
+     * @param documentId identifier of the document being indexed
+     * @param chunks chunks whose text is embedded and stored
+     */
+    public void index(String documentId, List&lt;Chunk&gt; chunks) {
+<span class="fc" id="L52">        List&lt;String&gt; texts = chunks.stream().map(Chunk::text).collect(Collectors.toList());</span>
+<span class="fc" id="L53">        List&lt;float[]&gt; vectors = embeddings.embedAll(texts);</span>
+<span class="fc" id="L54">        store.upsert(documentId, chunks, vectors);</span>
+<span class="fc" id="L55">    }</span>
+
+    /**
+     * Retrieve matching passages for a question, excluding scores below the configured threshold.
+     *
+     * @param documentId identifier of the document to search
+     * @param question text to embed as the search query
+     * @return store results whose scores are greater than or equal to the minimum score
+     */
+    public List&lt;ScoredChunk&gt; retrieve(String documentId, String question) {
+<span class="fc" id="L65">        float[] q = embeddings.embed(question);</span>
+<span class="fc" id="L66">        return store.search(documentId, q, topK).stream()</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">                .filter(sc -&gt; sc.score() &gt;= minScore)</span>
+<span class="fc" id="L68">                .collect(Collectors.toList());</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

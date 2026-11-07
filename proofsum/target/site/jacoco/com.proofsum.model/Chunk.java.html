@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>Chunk.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">ProofSum</a> &gt; <a href="index.source.html" class="el_package">com.proofsum.model</a> &gt; <span class="el_source">Chunk.java</span></div><h1>Chunk.java</h1><pre class="source lang-java linenums">package com.proofsum.model;
+
+/**
+ * Represent a paper passage together with its document, page, section, and ordering metadata.
+ *
+ * @param id unique identifier assigned to this chunk
+ * @param documentId identifier of the source document
+ * @param pageNumber one-based page number containing the passage
+ * @param section section associated with the passage
+ * @param ordinal position of this chunk in the document's chunk sequence
+ * @param text passage text
+ */
+<span class="fc" id="L13">public record Chunk(</span>
+        String id,
+        String documentId,
+        int pageNumber,
+        String section,
+        int ordinal,
+        String text
+) {}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

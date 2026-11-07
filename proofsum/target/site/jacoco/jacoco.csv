@@ -1,0 +1,23 @@
+GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
+ProofSum,com.proofsum.store,InMemoryVectorStore,22,205,4,14,0,28,5,12,1,7
+ProofSum,com.proofsum.store,VectorStore.DocumentInfo,0,15,0,0,0,1,0,1,0,1
+ProofSum,com.proofsum.store,InMemoryVectorStore.Entry,0,9,0,0,0,1,0,1,0,1
+ProofSum,com.proofsum.controller,PaperController.DocumentNotFoundException,4,0,0,0,1,0,1,0,1,0
+ProofSum,com.proofsum.controller,ApiExceptionHandler,50,0,0,0,6,0,6,0,6,0
+ProofSum,com.proofsum.controller,PaperController,147,0,2,0,24,0,9,0,8,0
+ProofSum,com.proofsum,ProofSumApplication,8,0,0,0,3,0,2,0,2,0
+ProofSum,com.proofsum.service,RetrievalService,0,65,0,2,0,14,0,5,0,4
+ProofSum,com.proofsum.service,LlmService,656,0,57,0,100,0,40,0,11,0
+ProofSum,com.proofsum.service,ChunkingService,3,257,4,18,0,51,4,14,0,7
+ProofSum,com.proofsum.service,PdfProcessingService,194,0,30,0,43,0,21,0,6,0
+ProofSum,com.proofsum.service,LlmService.new Record() {...},12,0,0,0,1,0,1,0,1,0
+ProofSum,com.proofsum.service,EmbeddingService,155,471,20,28,21,40,18,15,1,8
+ProofSum,com.proofsum.service,SummaryService,90,0,2,0,19,0,5,0,4,0
+ProofSum,com.proofsum.model,PageText,0,9,0,0,0,1,0,1,0,1
+ProofSum,com.proofsum.model,Evidence,18,0,0,0,1,0,1,0,1,0
+ProofSum,com.proofsum.model,UploadResponse,18,0,0,0,1,0,1,0,1,0
+ProofSum,com.proofsum.model,Chunk,0,21,0,0,0,1,0,1,0,1
+ProofSum,com.proofsum.model,AnswerResponse,21,0,0,0,1,0,1,0,1,0
+ProofSum,com.proofsum.model,QuestionRequest,9,0,0,0,1,0,1,0,1,0
+ProofSum,com.proofsum.model,ApiError,9,0,0,0,1,0,1,0,1,0
+ProofSum,com.proofsum.model,ScoredChunk,0,9,0,0,0,1,0,1,0,1
